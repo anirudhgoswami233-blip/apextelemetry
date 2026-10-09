@@ -1,0 +1,109 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  color-scheme: dark;
+}
+
+html,
+body {
+  background: #07080a;
+  color: #e9edf2;
+}
+
+body {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Numbers must line up vertically in every table in the application. */
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+@layer components {
+  .panel {
+    @apply rounded border border-graphite-700 bg-graphite-900;
+  }
+
+  .panel-header {
+    @apply flex items-center justify-between gap-3 border-b border-graphite-700 px-3 py-2;
+  }
+
+  .panel-title {
+    @apply text-2xs font-semibold uppercase tracking-[0.14em] text-ink-muted;
+  }
+
+  .field {
+    @apply w-full rounded border border-graphite-700 bg-graphite-850 px-2 py-1.5 text-sm
+           text-ink outline-none transition-colors;
+  }
+
+  .field:focus {
+    @apply border-graphite-500;
+  }
+
+  .field-label {
+    @apply mb-1 block text-2xs font-medium uppercase tracking-wider text-ink-faint;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 rounded border border-graphite-600
+           bg-graphite-800 px-3 py-1.5 text-xs font-medium text-ink transition-colors
+           hover:border-graphite-500 hover:bg-graphite-700
+           disabled:cursor-not-allowed disabled:opacity-40;
+  }
+
+  .btn-primary {
+    @apply border-signal-info/40 bg-signal-info/10 text-signal-info
+           hover:border-signal-info/70 hover:bg-signal-info/20;
+  }
+
+  .data-table {
+    @apply w-full border-collapse text-xs;
+  }
+
+  .data-table th {
+    @apply sticky top-0 z-10 whitespace-nowrap border-b border-graphite-700 bg-graphite-850
+           px-2 py-1.5 text-left text-2xs font-semibold uppercase tracking-wider text-ink-faint;
+  }
+
+  .data-table td {
+    @apply whitespace-nowrap border-b border-graphite-800 px-2 py-1.5 align-middle;
+  }
+
+  .data-table tbody tr:hover {
+    @apply bg-graphite-850;
+  }
+}
+
+/* Scrollbars that read as instrument chrome rather than OS furniture. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: #0b0d10;
+}
+::-webkit-scrollbar-thumb {
+  background: #2a323b;
+  border-radius: 5px;
+  border: 2px solid #0b0d10;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3a444f;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}

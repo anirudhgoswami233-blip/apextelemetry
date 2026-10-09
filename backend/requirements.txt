@@ -1,0 +1,9 @@
+fastapi>=0.115
+uvicorn[standard]>=0.32
+httpx>=0.27
+pydantic>=2.9
+numpy>=1.26
+scipy>=1.13
+# Optional: narrative generation for the AI race engineer endpoint.
+# The endpoint returns its evidence bundle without this installed.
+anthropic>=0.40
