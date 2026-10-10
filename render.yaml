@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: apextelemetry-api
+    runtime: python
+    rootDir: backend
+    plan: free
+    region: singapore
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.10"
+      # Set to your Vercel URL after that deploy exists. No trailing slash.
+      - key: APEX_CORS_ORIGINS
+        sync: false
+      # Free instances have an ephemeral filesystem, so the cache can't be durable.
+      - key: APEX_CACHE_DIR
+        value: /tmp/apex-cache
+      # Public deploy shares one rate-limit budget across all visitors,
+      # so these sit well under OpenF1's 3 req/s and 30 req/min ceiling.
+      - key: OPENF1_RPS
+        value: "2"
+      - key: OPENF1_RPM
+        value: "24"
