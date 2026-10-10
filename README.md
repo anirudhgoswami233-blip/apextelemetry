@@ -1,12 +1,29 @@
 # ApexTelemetry
 
-A Formula 1 telemetry, lap-delta, corner and strategy analysis workstation.
+**🔴 Live: [apextelemetry-seven.vercel.app](https://apextelemetry-seven.vercel.app)**
 
-The organising principle of this codebase is that **every number on screen says
-where it came from**. The provider measures lap times, speeds and positions. It
-does not measure tyre condition, fuel load, apex location, or the exact metre a
-driver touched the brakes. Anything in the second category is computed, labelled
-`calculated` or `estimated`, and carries its own uncertainty.
+> Hosted on a free tier — the backend sleeps after ~15 minutes idle, so the first
+> load may take 30–60 seconds to wake. Subsequent loads are instant.
+
+A Formula 1 telemetry, lap-delta, corner and strategy analysis workstation, built
+on real OpenF1 data from 2023 onward.
+
+**What it does:** synchronised telemetry comparison between any two drivers on any
+two laps · cumulative lap-delta on a distance axis · corner-by-corner braking
+analysis with a configurable detection threshold · tyre degradation fits with
+stated uncertainty · an AI race engineer grounded in computed evidence rather
+than general F1 knowledge.
+
+**The idea behind it:** every number on screen says where it came from. The
+provider measures lap times, speeds and positions. It does not measure tyre
+condition, fuel load, apex location, or the exact metre a driver touched the
+brakes. Anything in the second category is computed, labelled `calculated` or
+`estimated`, and carries its own uncertainty — a braking point reads `318 ±12 m`,
+and a difference between two drivers is only called significant when it exceeds
+the combined sampling uncertainty of both traces.
+
+**Stack:** FastAPI · numpy/scipy · Next.js · TypeScript · ECharts · Tailwind
+**Tests:** 62, run against a synthetic circuit with known ground truth
 
 ---
 
