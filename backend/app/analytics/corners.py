@@ -43,7 +43,13 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from .alignment import LapTrace
-from .braking import BrakeDetectionConfig, BrakeEvent, brake_event_before, detect_brake_events
+from .braking import (
+    BrakeDetectionConfig,
+    BrakeEvent,
+    assign_brake_events,
+    brake_event_before,
+    detect_brake_events,
+)
 
 
 @dataclass(frozen=True)
@@ -421,7 +427,17 @@ def corner_metrics(
     config: CornerDetectionConfig | None = None,
     brake_config: BrakeDetectionConfig | None = None,
     brake_events: list[BrakeEvent] | None = None,
+    assigned_brake: BrakeEvent | None = None,
+    brake_assigned: bool = False,
 ) -> CornerMetrics:
+    """Measure one corner.
+
+    ``brake_assigned`` says the caller has already decided which braking event
+    belongs to this corner (see :func:`corner_metrics_for_lap`), including
+    deciding it has none. Without it this function looks the event up on its
+    own, which is correct in isolation but lets two nearby corners claim the
+    same braking event.
+    """
     config = config or CornerDetectionConfig()
     events = brake_events if brake_events is not None else detect_brake_events(trace, brake_config)
 
@@ -457,7 +473,15 @@ def corner_metrics(
         else None
     )
 
-    brake = brake_event_before(events, corner.entry_m, window_m=config.approach_m)
+    if brake_assigned:
+        brake = assigned_brake
+        if brake is None:
+            notes.append(
+                "no separate braking event for this corner — the braking for this "
+                "complex was attributed to the preceding corner"
+            )
+    else:
+        brake = brake_event_before(events, corner.entry_m, window_m=config.approach_m)
 
     throttle_application = None
     time_to_full = None
@@ -513,6 +537,41 @@ def corner_metrics(
         spatial_resolution_m=trace.spatial_resolution(corner.apex_m),
         notes=notes,
     )
+
+
+def corner_metrics_for_lap(
+    trace: LapTrace,
+    corners: list[Corner],
+    *,
+    config: CornerDetectionConfig | None = None,
+    brake_config: BrakeDetectionConfig | None = None,
+    brake_events: list[BrakeEvent] | None = None,
+) -> list[CornerMetrics]:
+    """Measure every corner on one lap, sharing out braking events exclusively.
+
+    This is the entry point callers should use. Measuring corners one at a time
+    lets neighbouring corners report the same braking event twice; here the
+    whole lap is considered at once, so each detected event belongs to exactly
+    one corner.
+    """
+    config = config or CornerDetectionConfig()
+    events = brake_events if brake_events is not None else detect_brake_events(trace, brake_config)
+
+    assigned = assign_brake_events(
+        [c.entry_m for c in corners], events, window_m=config.approach_m
+    )
+
+    return [
+        corner_metrics(
+            trace,
+            corner,
+            config=config,
+            brake_events=events,
+            assigned_brake=event,
+            brake_assigned=True,
+        )
+        for corner, event in zip(corners, assigned)
+    ]
 
 
 # ----------------------------------------------------------------------

@@ -212,8 +212,8 @@ function TimingTower({ rows }: { rows: TimingRow[] }) {
       </thead>
       <tbody>
         {rows.map((row) => (
-          <tr key={row.driver_number}>
-            <td className="num text-ink-muted">{row.position ?? DASH}</td>
+          <tr key={row.driver_number} className={row.retired ? "opacity-55" : undefined}>
+            <td className="num text-ink-muted">{row.retired ? DASH : row.position ?? DASH}</td>
             <td>
               <div className="flex items-center gap-2">
                 <span
@@ -223,15 +223,28 @@ function TimingTower({ rows }: { rows: TimingRow[] }) {
                 />
                 <span className="num font-semibold text-ink">{row.acronym}</span>
                 <span className="num text-2xs text-ink-faint">{row.driver_number}</span>
-                {row.in_pit && (
-                  <span className="rounded-sm bg-signal-warn/15 px-1 text-2xs font-bold text-signal-warn">
-                    PIT
+                {row.retired ? (
+                  <span
+                    className="rounded-sm bg-signal-alert/15 px-1 text-2xs font-bold text-signal-alert"
+                    title={`Classified out after ${row.laps_completed} laps. Gap and interval are not shown because the feed's last values are frozen from the moment this car stopped.`}
+                  >
+                    OUT
                   </span>
+                ) : (
+                  row.in_pit && (
+                    <span className="rounded-sm bg-signal-warn/15 px-1 text-2xs font-bold text-signal-warn">
+                      PIT
+                    </span>
+                  )
                 )}
               </div>
             </td>
-            <td className="num text-right text-ink-muted">{gap(row.gap_to_leader)}</td>
-            <td className="num text-right text-ink-muted">{gap(row.interval)}</td>
+            <td className="num text-right text-ink-muted">
+              {row.retired ? DASH : gap(row.gap_to_leader)}
+            </td>
+            <td className="num text-right text-ink-muted">
+              {row.retired ? DASH : gap(row.interval)}
+            </td>
             <td className="num text-right text-ink">{lapTime(row.last_lap)}</td>
             <td
               className={`num text-right ${row.is_session_best ? "text-signal-purple" : "text-ink"}`}

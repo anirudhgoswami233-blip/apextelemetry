@@ -33,6 +33,11 @@ from .analytics import (
     compare_corner,
     compute_delta,
     corner_metrics,
+    corner_metrics_for_lap,
+    is_retired,
+    last_timed_lap,
+    tower_sort_key,
+    visible_gaps,
     detect_brake_events,
     lap_window,
     summarise_pit_stops,
@@ -325,20 +330,23 @@ class SessionService:
             [v if v is not None else np.nan for v in comparison["delta"]["delta"]], dtype=float
         )
 
+        # Assign braking events across the whole lap rather than per corner, so
+        # two corners close together cannot both claim the same event.
+        metrics_a = corner_metrics_for_lap(
+            trace_a, circuit.corners, config=corner_config, brake_events=events_a
+        )
+        metrics_b = corner_metrics_for_lap(
+            trace_b, circuit.corners, config=corner_config, brake_events=events_b
+        )
+
         rows = []
-        for corner in circuit.corners:
-            metrics_a = corner_metrics(
-                trace_a, corner, config=corner_config, brake_events=events_a
-            )
-            metrics_b = corner_metrics(
-                trace_b, corner, config=corner_config, brake_events=events_b
-            )
+        for corner, m_a, m_b in zip(circuit.corners, metrics_a, metrics_b):
             rows.append(
                 jsonable(
                     compare_corner(
                         corner,
-                        metrics_a,
-                        metrics_b,
+                        m_a,
+                        m_b,
                         delta_distance=distance,
                         delta_values=values,
                         config=corner_config,
@@ -452,18 +460,34 @@ class SessionService:
             (l.lap_duration for l in laps if l.lap_duration is not None), default=None
         )
 
+        # A car that stopped early keeps its final gap and interval in the feed
+        # forever. Rendering those as current makes a car fifty laps down look
+        # like it is a second behind, so laps completed decides who is still
+        # running and stale figures are suppressed for everyone else.
+        leader_laps = max((len(l) for l in by_driver.values()), default=0)
+
         rows = []
         for driver in drivers:
             driver_laps = by_driver.get(driver.driver_number, [])
             timed = [l for l in driver_laps if l.lap_duration is not None]
-            last = driver_laps[-1] if driver_laps else None
+            last = last_timed_lap(driver_laps)
+            latest = driver_laps[-1] if driver_laps else None
             best = min(timed, key=lambda l: l.lap_duration) if timed else None
+            retired = is_retired(len(driver_laps), leader_laps)
             stint = current_stint.get(driver.driver_number)
             interval = latest_interval.get(driver.driver_number)
 
             tyre_age = None
             if stint and stint.lap_start is not None and last and last.lap_number is not None:
                 tyre_age = (stint.tyre_age_at_start or 0) + (last.lap_number - stint.lap_start)
+
+            position = latest_position.get(driver.driver_number)
+            gap_to_leader, gap_ahead = visible_gaps(
+                retired=retired,
+                position=position,
+                gap_to_leader=getattr(interval, "gap_to_leader", None),
+                interval=getattr(interval, "interval", None),
+            )
 
             rows.append(
                 {
@@ -472,7 +496,7 @@ class SessionService:
                     "full_name": driver.full_name,
                     "team_name": driver.team_name,
                     "team_colour": driver.team_colour,
-                    "position": latest_position.get(driver.driver_number),
+                    "position": position,
                     "laps_completed": len(driver_laps),
                     "last_lap": last.lap_duration if last else None,
                     "best_lap": best.lap_duration if best else None,
@@ -482,17 +506,18 @@ class SessionService:
                     "sectors": last.sectors if last else [None, None, None],
                     "best_sectors": _best_sectors(timed),
                     "speed_trap": last.st_speed if last else None,
-                    "gap_to_leader": getattr(interval, "gap_to_leader", None),
-                    "interval": getattr(interval, "interval", None),
+                    "gap_to_leader": gap_to_leader,
+                    "interval": gap_ahead,
                     "compound": stint.compound if stint else None,
                     "stint_number": stint.stint_number if stint else None,
                     "tyre_age": tyre_age,
                     "tyre_age_provenance": "calculated" if tyre_age is not None else "unavailable",
-                    "in_pit": bool(last and last.is_pit_out_lap),
+                    "in_pit": bool(latest and latest.is_pit_out_lap),
+                    "retired": retired,
                 }
             )
 
-        rows.sort(key=lambda r: (r["position"] is None, r["position"] or 999))
+        rows.sort(key=tower_sort_key)
 
         return {
             "status": jsonable(status),

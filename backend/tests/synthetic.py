@@ -71,6 +71,28 @@ def rounded_rectangle(
     ]
 
 
+def linked_corner_circuit(gap_m: float = 40.0, radius: float = 60.0) -> list[TrackSegment]:
+    """A circuit with two corners almost joined together.
+
+    This is the shape that broke braking-point attribution on the real data:
+    Singapore's T5 and T6 sit close enough that one application of the brakes
+    serves both, and a per-corner lookup reported the same braking point twice.
+    ``gap_m`` is the straight between them.
+    """
+    q = 0.5 * np.pi * radius
+    return [
+        TrackSegment(600.0, None),
+        TrackSegment(q, radius, -1),
+        TrackSegment(gap_m, None),
+        TrackSegment(q, radius, -1),
+        TrackSegment(700.0, None),
+        TrackSegment(q, radius + 10, -1),
+        TrackSegment(300.0, None),
+        TrackSegment(q, radius + 10, -1),
+        TrackSegment(200.0, None),
+    ]
+
+
 def build_path(segments: list[TrackSegment], step: float = 1.0):
     """Walk the segment list, returning distance, x, y and curvature arrays."""
     distances, xs, ys, curvatures = [0.0], [0.0], [0.0], [0.0]

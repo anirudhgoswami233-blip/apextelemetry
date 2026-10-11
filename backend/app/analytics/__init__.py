@@ -14,7 +14,13 @@ from .alignment import (
     integrate_distance,
     lap_window,
 )
-from .braking import BrakeDetectionConfig, BrakeEvent, brake_event_before, detect_brake_events
+from .braking import (
+    BrakeDetectionConfig,
+    BrakeEvent,
+    assign_brake_events,
+    brake_event_before,
+    detect_brake_events,
+)
 from .corners import (
     CircuitMap,
     Corner,
@@ -24,6 +30,7 @@ from .corners import (
     build_circuit_map,
     compare_corner,
     corner_metrics,
+    corner_metrics_for_lap,
 )
 from .delta import (
     DeltaRegion,
@@ -34,6 +41,13 @@ from .delta import (
     compute_delta,
     representative_laps,
     sector_delta,
+)
+from .timing import (
+    RETIREMENT_LAP_MARGIN,
+    is_retired,
+    last_timed_lap,
+    tower_sort_key,
+    visible_gaps,
 )
 from .stints import (
     DegradationFit,
@@ -59,6 +73,7 @@ __all__ = [
     "lap_window",
     "BrakeDetectionConfig",
     "BrakeEvent",
+    "assign_brake_events",
     "brake_event_before",
     "detect_brake_events",
     "CircuitMap",
@@ -69,6 +84,7 @@ __all__ = [
     "build_circuit_map",
     "compare_corner",
     "corner_metrics",
+    "corner_metrics_for_lap",
     "DeltaRegion",
     "LapDelta",
     "LapQuality",
@@ -77,6 +93,11 @@ __all__ = [
     "compute_delta",
     "representative_laps",
     "sector_delta",
+    "RETIREMENT_LAP_MARGIN",
+    "is_retired",
+    "last_timed_lap",
+    "tower_sort_key",
+    "visible_gaps",
     "DegradationFit",
     "PitSummary",
     "ScenarioResult",

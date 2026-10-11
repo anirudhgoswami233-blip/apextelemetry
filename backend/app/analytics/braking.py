@@ -253,8 +253,53 @@ def brake_event_before(events: list[BrakeEvent], distance_m: float, *, window_m:
     ``window_m`` bounds how far back to look. A 400 m approach covers even the
     longest heavy-braking zones on the calendar without reaching back into the
     previous corner on a tight circuit.
+
+    This answers for one corner in isolation. When assigning events across a
+    whole lap, use :func:`assign_brake_events` instead — two corners close
+    together will otherwise both claim the same braking event.
     """
     candidates = [
         e for e in events if distance_m - window_m <= e.onset_distance_m <= distance_m
     ]
     return max(candidates, key=lambda e: e.onset_distance_m) if candidates else None
+
+
+def assign_brake_events(
+    corner_entries: list[float],
+    events: list[BrakeEvent],
+    *,
+    window_m: float = 400.0,
+) -> list[BrakeEvent | None]:
+    """Give each corner at most one braking event, and each event to one corner.
+
+    Looking up each corner independently produces a wrong answer whenever two
+    corners sit closer together than the approach window: both find the same
+    event and both report the same braking point, which reads as though the
+    driver braked twice in the same place.
+
+    Physically, one braking event precedes one corner complex. So corners are
+    walked in distance order and each claims the latest unclaimed event in its
+    approach. A corner with nothing left to claim reports ``None``, which is
+    the honest answer — a linked corner taken without a separate application of
+    the brakes has no braking point of its own.
+    """
+    claimed: set[int] = set()
+    out: list[BrakeEvent | None] = []
+
+    for entry in corner_entries:
+        best_index: int | None = None
+        best_distance = -float("inf")
+        for index, event in enumerate(events):
+            if index in claimed:
+                continue
+            if not (entry - window_m <= event.onset_distance_m <= entry):
+                continue
+            if event.onset_distance_m > best_distance:
+                best_distance = event.onset_distance_m
+                best_index = index
+        if best_index is None:
+            out.append(None)
+        else:
+            claimed.add(best_index)
+            out.append(events[best_index])
+    return out

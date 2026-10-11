@@ -129,6 +129,7 @@ export interface TimingRow {
   tyre_age?: number | null;
   tyre_age_provenance: Provenance;
   in_pit: boolean;
+  retired: boolean;
 }
 
 export interface RaceControlMessage {

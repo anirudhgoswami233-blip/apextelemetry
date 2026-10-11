@@ -15,21 +15,32 @@ from app.analytics import (  # noqa: E402
     BrakeDetectionConfig,
     CornerDetectionConfig,
     StrategyAssumptions,
+    assign_brake_events,
     build_circuit_map,
     build_lap_trace,
     classify_laps,
     compare_corner,
     compute_delta,
     corner_metrics,
+    corner_metrics_for_lap,
     detect_brake_events,
     fit_degradation,
     integrate_distance,
+    is_retired,
+    last_timed_lap,
     lap_window,
     safety_car_scenario,
+    tower_sort_key,
     undercut_scenario,
+    visible_gaps,
 )
+from app.analytics.braking import BrakeEvent  # noqa: E402
 from app.models import CarSample, Lap  # noqa: E402
-from tests.synthetic import rounded_rectangle, sample_lap  # noqa: E402
+from tests.synthetic import (  # noqa: E402
+    linked_corner_circuit,
+    rounded_rectangle,
+    sample_lap,
+)
 
 
 def make_trace(**kwargs):
@@ -383,6 +394,117 @@ class TestCornerMetrics(unittest.TestCase):
         self.assertGreater(metrics.spatial_resolution_m, 0)
 
 
+class TestBrakeEventAssignment(unittest.TestCase):
+    """Each corner gets at most one event, and each event serves one corner.
+
+    Looking events up per corner is what made two adjacent corners report the
+    same braking point, which reads as though the driver braked twice in the
+    same place.
+    """
+
+    @staticmethod
+    def _event(distance: float) -> BrakeEvent:
+        return BrakeEvent(
+            onset_distance_m=distance,
+            onset_uncertainty_m=10.0,
+            onset_time_s=0.0,
+            speed_at_onset_kph=300.0,
+        )
+
+    def test_adjacent_corners_cannot_share_one_event(self):
+        events = [self._event(1900.0)]
+        # Two corners 80 m apart, both within the 250 m approach window.
+        assigned = assign_brake_events([1950.0, 2030.0], events, window_m=250.0)
+        self.assertIs(assigned[0], events[0])
+        self.assertIsNone(assigned[1], "second corner must not reuse the same event")
+
+    def test_each_corner_takes_its_own_event_when_both_exist(self):
+        events = [self._event(1900.0), self._event(2150.0)]
+        assigned = assign_brake_events([1950.0, 2200.0], events, window_m=250.0)
+        self.assertEqual(assigned[0].onset_distance_m, 1900.0)
+        self.assertEqual(assigned[1].onset_distance_m, 2150.0)
+
+    def test_earlier_corner_claims_first(self):
+        """Braking belongs to the corner the driver reaches first."""
+        events = [self._event(1000.0)]
+        assigned = assign_brake_events([1050.0, 1100.0, 1150.0], events, window_m=300.0)
+        self.assertIsNotNone(assigned[0])
+        self.assertIsNone(assigned[1])
+        self.assertIsNone(assigned[2])
+
+    def test_no_event_outside_the_window(self):
+        events = [self._event(100.0)]
+        self.assertEqual(assign_brake_events([900.0], events, window_m=250.0), [None])
+
+    def test_every_event_used_at_most_once_on_a_real_lap(self):
+        trace, _, _ = make_trace()
+        circuit = build_circuit_map(trace)
+        events = detect_brake_events(trace)
+        assigned = assign_brake_events(
+            [c.entry_m for c in circuit.corners], events, window_m=250.0
+        )
+        used = [id(a) for a in assigned if a is not None]
+        self.assertEqual(len(used), len(set(used)), "an event was assigned to two corners")
+
+    def test_batch_metrics_report_distinct_braking_points(self):
+        trace, _, _ = make_trace()
+        circuit = build_circuit_map(trace)
+        metrics = corner_metrics_for_lap(trace, circuit.corners)
+        points = [
+            round(m.brake.onset_distance_m, 3) for m in metrics if m.brake is not None
+        ]
+        self.assertEqual(len(points), len(set(points)), f"duplicate braking points: {points}")
+
+    def test_linked_corners_regression(self):
+        """The Singapore T5/T6 case, end to end.
+
+        On a circuit where two corners share one braking zone, the old
+        per-corner lookup reported an identical braking point for both. This
+        test fails against that behaviour and passes against the fix.
+        """
+        car, loc, lap, _ = sample_lap(
+            segments=linked_corner_circuit(gap_m=40.0), driver_number=1, seed=4
+        )
+        trace = build_lap_trace(car, lap=lap, locations=loc)
+        circuit = build_circuit_map(
+            trace, CornerDetectionConfig(radius_threshold_m=300, merge_gap_m=15)
+        )
+        self.assertGreaterEqual(len(circuit.corners), 4)
+
+        events = detect_brake_events(trace)
+        # The old path: every corner looks the event up for itself.
+        naive = [corner_metrics(trace, c, brake_events=events) for c in circuit.corners]
+        naive_points = [
+            round(m.brake.onset_distance_m, 1) for m in naive if m.brake is not None
+        ]
+        self.assertLess(
+            len(set(naive_points)), len(naive_points),
+            "fixture no longer reproduces the bug — corners are too far apart",
+        )
+
+        # The fixed path.
+        fixed = corner_metrics_for_lap(trace, circuit.corners)
+        points = [round(m.brake.onset_distance_m, 1) for m in fixed if m.brake is not None]
+        self.assertEqual(
+            len(points), len(set(points)),
+            f"two corners still report the same braking point: {points}",
+        )
+
+    def test_corner_without_its_own_event_says_so(self):
+        trace, _, _ = make_trace()
+        circuit = build_circuit_map(trace)
+        # A wide approach forces competition between corners for the same events.
+        metrics = corner_metrics_for_lap(
+            trace, circuit.corners, config=CornerDetectionConfig(approach_m=900.0)
+        )
+        without = [m for m in metrics if m.brake is None]
+        for m in without:
+            self.assertTrue(
+                any("no separate braking event" in n for n in m.notes),
+                "a corner with no braking event must explain why",
+            )
+
+
 class TestCornerComparison(unittest.TestCase):
     def test_identical_laps_show_no_significant_difference(self):
         trace, lap, _ = make_trace()
@@ -448,6 +570,100 @@ class TestCornerComparison(unittest.TestCase):
 # ======================================================================
 # Lap classification
 # ======================================================================
+
+
+class TestTimingTower(unittest.TestCase):
+    """The tower must not present frozen figures as current ones.
+
+    These cases come from the 2026 Singapore race, where cars that retired on
+    laps 8, 30 and 37 were shown with gaps like "+40.541" and "+1 LAP" against
+    a leader who completed 62.
+    """
+
+    def test_retired_car_is_detected_by_lap_count(self):
+        self.assertTrue(is_retired(8, 62))
+        self.assertTrue(is_retired(30, 62))
+        self.assertTrue(is_retired(37, 62))
+
+    def test_lapped_but_running_car_is_not_retired(self):
+        """A car two laps down in a long race is still circulating."""
+        self.assertFalse(is_retired(62, 62))
+        self.assertFalse(is_retired(61, 62))
+        self.assertFalse(is_retired(60, 62))
+
+    def test_no_retirements_before_the_session_starts(self):
+        self.assertFalse(is_retired(0, 0))
+
+    def test_retired_car_shows_no_gaps(self):
+        gap_leader, interval = visible_gaps(
+            retired=True, position=19, gap_to_leader=40.541, interval=0.802
+        )
+        self.assertIsNone(gap_leader)
+        self.assertIsNone(interval)
+
+    def test_leader_has_no_interval(self):
+        """Interval is the gap to the car ahead; the leader has none."""
+        gap_leader, interval = visible_gaps(
+            retired=False, position=1, gap_to_leader=0.0, interval=0.0
+        )
+        self.assertEqual(gap_leader, 0.0)
+        self.assertIsNone(interval, "P1 must not render an interval")
+
+    def test_runner_keeps_both_figures(self):
+        gap_leader, interval = visible_gaps(
+            retired=False, position=2, gap_to_leader=7.335, interval=7.335
+        )
+        self.assertEqual((gap_leader, interval), (7.335, 7.335))
+
+    def test_string_gaps_survive(self):
+        """The feed sends '+1 LAP' as a string for lapped cars."""
+        gap_leader, interval = visible_gaps(
+            retired=False, position=11, gap_to_leader="+1 LAP", interval=12.066
+        )
+        self.assertEqual(gap_leader, "+1 LAP")
+
+    def test_runners_sort_above_retirements(self):
+        rows = [
+            {"position": 19, "laps_completed": 8, "retired": True},
+            {"position": 2, "laps_completed": 62, "retired": False},
+            {"position": 21, "laps_completed": 30, "retired": True},
+            {"position": 1, "laps_completed": 62, "retired": False},
+        ]
+        ordered = sorted(rows, key=tower_sort_key)
+        self.assertEqual([r["position"] for r in ordered[:2]], [1, 2])
+        self.assertTrue(all(r["retired"] for r in ordered[2:]))
+
+    def test_retirements_order_by_distance_covered(self):
+        """The car that got furthest is classified ahead of the one that did not."""
+        rows = [
+            {"position": 19, "laps_completed": 8, "retired": True},
+            {"position": 18, "laps_completed": 37, "retired": True},
+            {"position": 21, "laps_completed": 30, "retired": True},
+        ]
+        ordered = sorted(rows, key=tower_sort_key)
+        self.assertEqual([r["laps_completed"] for r in ordered], [37, 30, 8])
+
+    def test_missing_position_sorts_last_among_runners(self):
+        rows = [
+            {"position": None, "laps_completed": 62, "retired": False},
+            {"position": 3, "laps_completed": 62, "retired": False},
+        ]
+        ordered = sorted(rows, key=tower_sort_key)
+        self.assertEqual(ordered[0]["position"], 3)
+
+    def test_last_lap_skips_untimed_trailing_laps(self):
+        """An in-lap with no recorded time is not the driver's last lap time."""
+        laps = [
+            Lap(driver_number=1, lap_number=1, lap_duration=92.1),
+            Lap(driver_number=1, lap_number=2, lap_duration=91.4),
+            Lap(driver_number=1, lap_number=3, lap_duration=None),
+        ]
+        self.assertEqual(last_timed_lap(laps).lap_number, 2)
+
+    def test_last_lap_is_none_when_nothing_was_timed(self):
+        laps = [Lap(driver_number=1, lap_number=1, lap_duration=None)]
+        self.assertIsNone(last_timed_lap(laps))
+        self.assertIsNone(last_timed_lap([]))
 
 
 class TestLapClassification(unittest.TestCase):
